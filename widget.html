@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Monitor</title>
+  <style>
+    /* ── Tokens ── */
+    :root {
+      --bg:         #0C0A08;
+      --surface:    #131008;
+      --border:     rgba(210, 110, 60, 0.22);
+      --text:       #EDE0CC;
+      --muted:      rgba(237, 224, 204, 0.38);
+      --dim:        rgba(237, 224, 204, 0.18);
+      --orange:     #D97757;
+      --orange-hi:  #F08A5F;
+      --amber:      #E8A855;
+      --deep-org:   #E86740;
+      --red:        #E84040;
+      --live:       #FF5030;
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "SF Mono", "Menlo", "Courier New", monospace;
+      font-size: 11px;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 8px;
+      overflow: hidden;
+      /* Make body draggable in native WKWebView window */
+      -webkit-app-region: drag;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* ── Widget card ── */
+    .widget {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 15px 12px;
+      box-shadow: 0 0 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(237,224,204,0.04);
+      overflow: hidden;
+    }
+
+    /* ── Animations ── */
+    @keyframes blink {
+      0%, 100% { opacity: 1; box-shadow: 0 0 5px 1px rgba(255,80,48,0.8); }
+      50%       { opacity: 0.25; box-shadow: none; }
+    }
+    @keyframes bar-glow {
+      0%, 100% { opacity: 0.9; }
+      50%       { opacity: 1; }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Header ── */
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.08em;
+    }
+    .title-dot { color: var(--orange); }
+    .snippet-copy-btn {
+      background: none;
+      border: none;
+      padding: 2px 3px;
+      cursor: pointer;
+      color: var(--dim);
+      outline: none;
+      display: flex;
+      align-items: center;
+      border-radius: 3px;
+      transition: color 0.15s, background 0.15s;
+      -webkit-app-region: no-drag;
+      flex-shrink: 0;
+    }
+    .snippet-copy-btn:hover { color: var(--orange); background: rgba(217,119,87,0.1); }
+    .snippet-copy-btn.copied { color: #6EE7B7; }
+
+    /* Live / status badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 2px 7px;
+      border-radius: 20px;
+    }
+    .badge-live {
+      color: var(--live);
+      background: rgba(255,80,48,0.1);
+      border: 1px solid rgba(255,80,48,0.3);
+    }
+    .badge-demo {
+      color: var(--muted);
+      background: rgba(237,224,204,0.05);
+      border: 1px solid rgba(237,224,204,0.1);
+    }
+    .badge-error {
+      color: var(--red);
+      background: rgba(232,64,64,0.1);
+      border: 1px solid rgba(232,64,64,0.3);
+    }
+    .badge-setup {
+      color: var(--muted);
+      background: rgba(237,224,204,0.05);
+      border: 1px solid rgba(237,224,204,0.1);
+    }
+    .live-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--live);
+      animation: blink 1.3s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    /* ── Meta ── */
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 9px;
+    }
+    .meta-plan-label { color: var(--dim); }
+    .meta-plan-value { color: rgba(237,224,204,0.7); }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(210,110,60,0.2) 30%, rgba(210,110,60,0.2) 70%, transparent);
+      margin: 8px 0;
+    }
+
+    /* ── Section label ── */
+    .section-label {
+      font-size: 8.5px;
+      color: var(--orange);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      opacity: 0.7;
+    }
+
+    /* ── Metric rows ── */
+    .metric { margin-bottom: 9px; }
+    .metric:last-of-type { margin-bottom: 0; }
+    .metric.fresh { animation: fade-in 0.3s ease; }
+
+    .metric-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+    .metric-name {
+      font-size: 10.5px;
+      color: var(--text);
+      letter-spacing: 0.03em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-right: 6px;
+    }
+    .metric-resets {
+      font-size: 9.5px;
+      color: var(--muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .metric-bottom { display: flex; align-items: center; gap: 7px; }
+
+    .bar-track {
+      flex: 1; height: 5px;
+      background: rgba(210,110,60,0.07);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 5px;
+      border-radius: 3px;
+      transition: width 0.5s cubic-bezier(0.4,0,0.2,1),
+                  background-color 0.5s ease;
+      animation: bar-glow 2.5s ease-in-out infinite;
+    }
+
+    .metric-pct {
+      width: 30px;
+      text-align: right;
+      font-size: 10px;
+      color: var(--muted);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ══════════════════════════════════════
+       SETUP VIEW
+    ══════════════════════════════════════ */
+
+    .setup-steps { margin: 9px 0 10px; }
+    .step { display: flex; gap: 9px; margin-bottom: 7px; line-height: 1.5; }
+    .step:last-child { margin-bottom: 0; }
+    .step-num  { color: var(--orange); font-weight: 700; flex-shrink: 0; width: 10px; }
+    .step-text { color: var(--muted); }
+    .step-acc  { color: var(--text); }
+
+    .snippet-label {
+      font-size: 8px; color: var(--dim);
+      letter-spacing: 0.1em; text-transform: uppercase; margin: 10px 0 4px;
+    }
+    .snippet-box {
+      background: rgba(210,110,60,0.04);
+      border: 1px solid rgba(210,110,60,0.15);
+      border-radius: 5px;
+      padding: 7px 8px;
+      font-size: 8.5px;
+      color: var(--dim);
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.5;
+      max-height: 64px;
+      overflow: hidden;
+      user-select: all;
+    }
+    .copy-btn {
+      width: 100%; padding: 6px 0; margin: 6px 0 8px;
+      background: rgba(217,119,87,0.1);
+      border: 1px solid rgba(217,119,87,0.3);
+      border-radius: 5px;
+      color: var(--orange-hi);
+      font-family: "SF Mono","Menlo","Courier New",monospace;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+      outline: none;
+      -webkit-app-region: no-drag;
+    }
+    .copy-btn:hover  { background: rgba(217,119,87,0.18); border-color: rgba(217,119,87,0.45); }
+    .copy-btn:active { background: rgba(217,119,87,0.25); }
+    .copy-btn.copied { color: #6EE7B7; border-color: rgba(110,231,183,0.4); background: rgba(110,231,183,0.08); }
+
+    /* ── Pin button ── */
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pin-btn {
+      background: none;
+      border: none;
+      padding: 3px;
+      cursor: pointer;
+      color: var(--orange);
+      opacity: 1;
+      outline: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s, color 0.15s;
+      -webkit-app-region: no-drag;
+      border-radius: 3px;
+    }
+    .pin-btn:hover { opacity: 1; background: rgba(217,119,87,0.12); }
+    .pin-btn.unpinned { color: var(--muted); opacity: 0.45; }
+    .pin-btn.unpinned:hover { opacity: 0.75; }
+
+    .close-btn {
+      background: none;
+      border: none;
+      padding: 3px;
+      cursor: pointer;
+      color: var(--muted);
+      opacity: 0.5;
+      outline: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+      -webkit-app-region: no-drag;
+      border-radius: 3px;
+    }
+    .close-btn:hover { opacity: 1; color: var(--red); background: rgba(232,64,64,0.12); }
+
+    .browser-status {
+      font-size: 8.5px; color: var(--dim); letter-spacing: 0.03em; line-height: 1.5;
+    }
+
+    /* ── Views fill the card ── */
+    #widget-view, #setup-view {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+    #setup-view { display: none; }
+
+    /* ══════════════════════════════════════
+       FOOTER — REFRESH
+    ══════════════════════════════════════ */
+    .footer {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      margin-top: auto;          /* push to bottom */
+      padding-top: 8px;
+      border-top: 1px solid rgba(210,110,60,0.08);
+    }
+    .stale-badge { font-size: 8.5px; color: var(--red); letter-spacing: 0.04em; }
+    .refresh-wrap {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .refresh-label {
+      font-size: 8px;
+      color: rgba(217,119,87,0.45);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .refresh-value {
+      font-size: 11px;
+      color: rgba(217,119,87,0.75);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.03em;
+      min-width: 32px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+<div class="widget">
+
+  <!-- ── Header ── -->
+  <div class="header-row">
+    <div class="title-group">
+      <span class="title"><span class="title-dot">◆</span> CLAUDE MONITOR</span>
+      <button class="snippet-copy-btn" id="header-copy-btn" onclick="headerCopySnippet()" title="Copiar snippet de conexión">
+        <svg width="11" height="12" viewBox="0 0 11 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3.5" y="2.5" width="6" height="8" rx="1" stroke="currentColor" stroke-width="1"/>
+          <path d="M3.5 3.5H2.5A1 1 0 0 0 1.5 4.5v6a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-1" stroke="currentColor" stroke-width="1"/>
+        </svg>
+      </button>
+    </div>
+    <div class="header-right">
+      <!-- Pin: stays orange when pinned, fades when not -->
+      <button class="pin-btn pinned" id="pin-btn" onclick="togglePin()" title="Fijo encima — click para desfijar">
+        <svg width="11" height="13" viewBox="0 0 11 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3.5 1h4l1 1.5v3L10 7H1l1.5-1.5V2.5L3.5 1z" fill="currentColor" opacity="0.25"/>
+          <path d="M3.5 1h4l1 1.5v3L10 7H1l1.5-1.5V2.5L3.5 1z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/>
+          <line x1="5.5" y1="7" x2="5.5" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="badge badge-live" id="badge">
+        <span class="live-dot" id="live-dot"></span>
+        <span id="badge-text">LIVE</span>
+      </span>
+      <button class="close-btn" id="close-btn" onclick="closeWidget()" title="Cerrar widget (⌥⌘C para reabrir)">
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══ SETUP VIEW ══ -->
+  <div id="setup-view">
+    <div class="divider" style="margin-top:3px;margin-bottom:0"></div>
+    <div class="section-label" style="margin-top:9px">Instalar extensión · una sola vez</div>
+    <div class="setup-steps">
+      <div class="step">
+        <span class="step-num">1</span>
+        <span class="step-text">En Chrome abre <span class="step-acc">chrome://extensions</span> y activa <span class="step-acc">Modo desarrollador</span></span>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <span class="step-text"><span class="step-acc">Load unpacked</span> → elige la carpeta de abajo</span>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <span class="step-text">Inicia sesión en <span class="step-acc">claude.ai</span> — los datos llegan solos</span>
+      </div>
+    </div>
+    <div class="snippet-label">Carpeta de la extensión</div>
+    <div class="snippet-box" id="ext-path-box" style="user-select:all">…</div>
+    <button class="copy-btn" id="copy-ext-btn" style="margin-top:6px">⎘ &nbsp;Copiar ruta</button>
+    <button class="copy-btn" id="open-btn" style="margin-top:0" onclick="openClaude()">↗ &nbsp;Abrir claude.ai</button>
+    <!-- Fallback snippet (powers the header copy button for manual / no-extension users) -->
+    <div class="snippet-box" id="snippet-box" style="display:none"></div>
+  </div>
+
+  <!-- ══ WIDGET VIEW ══ -->
+  <div id="widget-view">
+    <div class="meta-row">
+      <span><span class="meta-plan-label">PLAN </span><span class="meta-plan-value" id="plan">—</span></span>
+      <span id="clock">00:00</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Sesión</div>
+    <div class="metric" id="session-metric">
+      <div class="metric-top">
+        <span class="metric-name">CURRENT</span>
+        <span class="metric-resets">─</span>
+      </div>
+      <div class="metric-bottom">
+        <div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
+        <span class="metric-pct">0%</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Límites semanales</div>
+    <div class="metric" id="weekly-metric-0">
+      <div class="metric-top"><span class="metric-name">—</span><span class="metric-resets">─</span></div>
+      <div class="metric-bottom"><div class="bar-track"><div class="bar-fill" style="width:0%"></div></div><span class="metric-pct">0%</span></div>
+    </div>
+    <div class="metric" id="weekly-metric-1">
+      <div class="metric-top"><span class="metric-name">—</span><span class="metric-resets">─</span></div>
+      <div class="metric-bottom"><div class="bar-track"><div class="bar-fill" style="width:0%"></div></div><span class="metric-pct">0%</span></div>
+    </div>
+    <div class="metric" id="weekly-metric-2">
+      <div class="metric-top"><span class="metric-name">—</span><span class="metric-resets">─</span></div>
+      <div class="metric-bottom"><div class="bar-track"><div class="bar-fill" style="width:0%"></div></div><span class="metric-pct">0%</span></div>
+    </div>
+
+    <!-- Footer / Refresh -->
+    <div class="footer">
+      <span class="stale-badge" id="error-stale" style="display:none">⚠ stale</span>
+      <div class="refresh-wrap">
+        <span class="refresh-label">Refresh</span>
+        <span class="refresh-value" id="countdown">00:60</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let lastData   = null;
+let errorState = false;
+let countdown  = 60;
+let fetching   = false;
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function barStyle(pct) {
+  if (pct <= 0)  return {color:'rgba(217,119,87,0.12)', glow:'none'};
+  if (pct < 50)  return {color:'#D97757', glow:'0 0 8px rgba(217,119,87,0.55)'};
+  if (pct < 75)  return {color:'#E8A855', glow:'0 0 8px rgba(232,168,85,0.55)'};
+  if (pct < 90)  return {color:'#E86740', glow:'0 0 8px rgba(232,103,64,0.6)'};
+  return              {color:'#E84040', glow:'0 0 10px rgba(232,64,64,0.65)'};
+}
+
+function fillMetric(el, name, pct, resets) {
+  const {color, glow} = barStyle(pct);
+  el.querySelector('.metric-name').textContent   = name;
+  el.querySelector('.metric-resets').textContent = resets ? `↺ ${resets}` : '─';
+  el.querySelector('.metric-pct').textContent    = `${pct}%`;
+  const fill = el.querySelector('.bar-fill');
+  fill.style.width      = `${pct}%`;
+  fill.style.background = color;
+  fill.style.boxShadow  = glow;
+  // Flash the metric row on update
+  el.classList.remove('fresh');
+  void el.offsetWidth;
+  el.classList.add('fresh');
+}
+
+// ── Badge helpers ──────────────────────────────────────────────────────────
+function setBadge(mode) {
+  const badge   = document.getElementById('badge');
+  const dot     = document.getElementById('live-dot');
+  const text    = document.getElementById('badge-text');
+  if (mode === 'live') {
+    badge.className = 'badge badge-live';
+    dot.style.display = 'block';
+    text.textContent = 'LIVE';
+  } else if (mode === 'stale') {
+    badge.className = 'badge badge-error';
+    dot.style.display = 'none';
+    text.textContent = 'STALE';
+  } else if (mode === 'demo') {
+    badge.className = 'badge badge-demo';
+    dot.style.display = 'none';
+    text.textContent = 'DEMO';
+  } else if (mode === 'error') {
+    badge.className = 'badge badge-error';
+    dot.style.display = 'none';
+    text.textContent = 'ERR';
+  } else { // setup
+    badge.className = 'badge badge-setup';
+    dot.style.display = 'none';
+    text.textContent = 'SETUP';
+  }
+}
+
+// ── Setup screen ────────────────────────────────────────────────────────────
+let _extPath = '';
+function renderSetup(data) {
+  setBadge('setup');
+  _snippet = data.snippet || '';
+  document.getElementById('snippet-box').textContent = _snippet;
+
+  _extPath = data.ext_path || '';
+  document.getElementById('ext-path-box').textContent = _extPath || '…';
+
+  document.getElementById('setup-view').style.display  = 'block';
+  document.getElementById('widget-view').style.display = 'none';
+}
+
+document.getElementById('copy-ext-btn').addEventListener('click', () => {
+  if (!_extPath) return;
+  navigator.clipboard.writeText(_extPath).then(() => {
+    const btn = document.getElementById('copy-ext-btn');
+    btn.textContent = '✓  ¡Ruta copiada!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '⎘  Copiar ruta'; btn.classList.remove('copied'); }, 2000);
+  });
+});
+
+// ── Widget screen ────────────────────────────────────────────────────────────
+function renderWidget(data) {
+  const isStale = errorState || data.stale;
+  setBadge(errorState ? 'error' : isStale ? 'stale' : data.demo ? 'demo' : 'live');
+  document.getElementById('plan').textContent = data.plan || '—';
+
+  const sess = data.session || {};
+  fillMetric(document.getElementById('session-metric'), 'CURRENT', sess.pct ?? 0, sess.resets ?? null);
+
+  (data.weekly || []).forEach((m, i) => {
+    const el = document.getElementById(`weekly-metric-${i}`);
+    if (el) fillMetric(el, m.name || '—', m.pct ?? 0, m.resets ?? null);
+  });
+
+  document.getElementById('error-stale').style.display = isStale ? 'inline' : 'none';
+  document.getElementById('setup-view').style.display  = 'none';
+  document.getElementById('widget-view').style.display = 'block';
+}
+
+function render(data) {
+  if (data && data.setup) renderSetup(data);
+  else renderWidget(data);
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  const el = document.getElementById('clock');
+  if (el) el.textContent = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+}
+
+// ── Countdown ────────────────────────────────────────────────────────────────
+function updateCountdown() {
+  const secs = Math.max(countdown, 0);
+  const el = document.getElementById('countdown');
+  if (el) el.textContent = `${pad2(Math.floor(secs/60))}:${pad2(secs%60)}`;
+}
+
+// ── Fetch ────────────────────────────────────────────────────────────────────
+async function fetchAndRender() {
+  if (fetching) return;
+  fetching = true;
+  try {
+    const resp = await fetch('/api/usage');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    lastData = data; errorState = false;
+    render(data);
+  } catch(_) {
+    errorState = true;
+    if (lastData) render(lastData);
+  }
+  countdown = 60; updateCountdown();
+  fetching = false;
+}
+
+// ── Tick ─────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  updateClock();
+  if (!fetching) {
+    countdown--;
+    if (countdown <= 0) fetchAndRender();
+    else updateCountdown();
+  }
+}, 1000);
+
+// Poll every 3 s while on setup so it flips to LIVE automatically
+setInterval(() => {
+  if (lastData && lastData.setup) fetchAndRender();
+}, 3000);
+
+// ── Header copy-snippet button (always available, live or setup) ─────────────
+let _snippet = '';
+async function headerCopySnippet() {
+  if (!_snippet) {
+    try {
+      const r = await fetch('/api/snippet');
+      const d = await r.json();
+      _snippet = d.snippet || '';
+    } catch(_) {}
+  }
+  if (!_snippet) return;
+  navigator.clipboard.writeText(_snippet).then(() => {
+    const btn = document.getElementById('header-copy-btn');
+    btn.classList.add('copied');
+    setTimeout(() => btn.classList.remove('copied'), 1500);
+  });
+}
+
+// ── Open claude.ai in the user's real browser (no new profile) ───────────────
+function openClaude() {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.widgetControl) {
+    window.webkit.messageHandlers.widgetControl.postMessage({ action: 'openURL', url: 'https://claude.ai' });
+  } else {
+    window.open('https://claude.ai', '_blank');
+  }
+}
+
+// ── Close button: hide the window (process stays alive so ⌥⌘C reopens) ───────
+function closeWidget() {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.widgetControl) {
+    window.webkit.messageHandlers.widgetControl.postMessage({ action: 'hide' });
+  }
+}
+
+// ── Pin button (native WKWebView bridge) ─────────────────────────────────────
+function togglePin() {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.widgetControl) {
+    window.webkit.messageHandlers.widgetControl.postMessage({ action: 'togglePin' });
+  }
+}
+// Called back from Swift after the window level changes
+function setPinned(pinned) {
+  const btn = document.getElementById('pin-btn');
+  if (!btn) return;
+  btn.classList.toggle('pinned',   pinned);
+  btn.classList.toggle('unpinned', !pinned);
+  btn.title = pinned
+    ? 'Fijo encima — click para desfijar'
+    : 'No fijo — click para fijar';
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+updateClock(); updateCountdown(); fetchAndRender();
+</script>
+</body>
+</html>
