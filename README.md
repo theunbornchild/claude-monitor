@@ -20,7 +20,7 @@ A minimal, frameless macOS desktop widget that shows your Claude usage limits in
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/claude-monitor.git
+git clone https://github.com/theunbornchild/claude-monitor.git
 cd claude-monitor
 ./install.sh
 ```
